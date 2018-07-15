@@ -1,0 +1,6 @@
+inside.tcpdump filter=lfs diff=lfs merge=lfs -text
+argus.* filter=lfs diff=lfs merge=lfs -text
+master_identifications.list filter=lfs diff=lfs merge=lfs -text
+master-listfile-condensed.txt filter=lfs diff=lfs merge=lfs -text
+sguild.log filter=lfs diff=lfs merge=lfs -text
+u2spewfoo-dump-from-snort.unified2.1530459893.txt filter=lfs diff=lfs merge=lfs -text
