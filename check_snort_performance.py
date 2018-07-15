@@ -15,9 +15,11 @@ debug = True	# print more output
 
 # parse truth data for a list of attacks
 def parseTruthData(truth_text):
+	if debug: print("[DEBUG] Parsing truth data..."); t0 = time.time()
 	copy = False
 	count = 0
-	attack = {'attack_name':'', 'datetime':'', 'duration':'','min_search_time':'','max_search_time':'','attacker_ip':'', 'victim_ip':'', 'ports':[], 'num_pkts':0, 'argus_lines':0}
+	#attack = {'attack_name':'', 'date_time':'', 'duration':'','min_search_time':'','max_search_time':'','attacker_ip':'', 'victim_ip':'', 'ports':[], 'num_pkts':0, 'connections':0, 'real_times':[], 'protocol':[], 'src_addr':[], 'src_port':[], 'dst_addr':[], 'dst_port':[]}
+	attack = {'attack_name':'', 'date_time':'', 'duration':'','min_search_time':'','max_search_time':'','attacker_ip':'', 'victim_ip':'', 'ports':[],  'num_pkts':0, 'connections':0, 'detections':[]}
 	attacks = list()
 	for line in truth_text:
 		line = line.strip() 
@@ -37,8 +39,7 @@ def parseTruthData(truth_text):
 				dur_min = pieces[2]
 				dur_sec = pieces[3]
 				date = dateutil.parser.parse(year+'-'+month+'-'+day+'T'+hour+':'+minute+':'+sec+'Z')
-				#date = date + timedelta(hours=5)	# adjust for GMT/DSL time offsets
-				attack['datetime'] = date
+				attack['date_time'] = date
 				attack['duration'] = timedelta(hours=int(dur_hour),minutes=int(dur_min),seconds=int(dur_sec))
 				attack['min_search_time'] = date - timedelta(hours=int(dur_hour),minutes=int(dur_min),seconds=int(dur_sec))	
 				attack['max_search_time'] = date + timedelta(hours=int(dur_hour),minutes=int(dur_min),seconds=int(dur_sec))
@@ -62,7 +63,7 @@ def parseTruthData(truth_text):
 					if port.strip().isdigit():
 						attack['ports'].append(port.strip())
 				attacks.append(attack)
-				attack = {'attack_name':'', 'datetime':'', 'duration':'','min_search_time':'','max_search_time':'','attacker_ip':'', 'victim_ip':'', 'ports':[], 'num_pkts':0, 'argus_lines':0}
+				attack = {'attack_name':'', 'date_time':'', 'duration':'','min_search_time':'','max_search_time':'','attacker_ip':'', 'victim_ip':'', 'ports':[], 'num_pkts':0, 'connections':0, 'detections':[]}
 				copy = False
 
 		if (line == "Date: 03/31/1999"):
@@ -73,6 +74,7 @@ def parseTruthData(truth_text):
 			year = pieces[2]
 			copy = True
 
+	if debug: print("[DEBUG] parseTruthData() run time: "+str(time.time()-t0)+" seconds")
 	return attacks
 
 
@@ -80,15 +82,16 @@ def parseTruthData(truth_text):
 # parse Sguil log messages for alerts, looks for lines with the following format:
 # 		2018-07-07 18:55:53 pid(3371)  Alert Received: 0 1 trojan-activity pching-VM-eth1-1 {1999-03-31 15:13:25} 2 15950 {ET MALWARE User-Agent (Win95)} 172.16.116.201 204.71.200.74 6 14461 80 1 2008015 9 293 293
 def parseSguilAlerts(detection_text, attacks):
+	if debug: print("[DEBUG] Parsing sguil log..."); t0 = time.time()
 	true_pos_alerts = list()
 	false_pos_alerts = list()
-	false_neg_attacks = list()
-	valid_attacks = list()
+	true_pos_attacks = list()
 	for line in detection_text:
 		if "Alert Received:" in line and "1999-03-31" in line:
-			alert = {'datetime':'', 'src_addr':'', 'dst_addr':'', 'src_port':'', 'dst_port':'', 'reason':'', 'num_pkts':0, 'argus_lines':0}
+			alert = {'date_time':'', 'src_addr':'', 'dst_addr':'', 'src_port':'', 'dst_port':'', 'reason':'', 'num_pkts':0, 'connections':0}
 			pieces = line.split('{')
-			alert['datetime'] = pytz.utc.localize(datetime.strptime(pieces[1].split('}')[0], "%Y-%m-%d %H:%M:%S")-timedelta(hours=5))	# un-adjust for GMT/DSL time offsets
+			# un-adjust for GMT/DSL time offsets here, something added +5 hours to the data
+			alert['date_time'] = pytz.utc.localize(datetime.strptime(pieces[1].split('}')[0], "%Y-%m-%d %H:%M:%S")-timedelta(hours=5))	
 			pieces = pieces[2].split('}')
 			alert['reason'] = pieces[0].strip()
 			pieces = pieces[1].strip().split(' ')
@@ -102,47 +105,58 @@ def parseSguilAlerts(detection_text, attacks):
 
 
 			# try to match alert against truth data attacks
+			tp = False
 			for attack in attacks:
-				if (attack['min_search_time'] < alert['datetime'] and alert['datetime'] < attack['max_search_time']):	# match time range
-					if (alert['src_port'] in attack['ports'] or alert['dst_port'] in attack['ports']):							# match ports	
-						if (alert['dst_addr'] == attack['attacker_ip'] or alert['dst_addr'] == attack['victim_ip']):				# match IP address
-							if (alert['src_addr'] == attack['attacker_ip'] or alert['src_addr'] == attack['victim_ip']):
-								if verbose: print("Alert Match: "+str(alert))
-								true_pos_alerts.append(alert)
-								valid_attacks.append(attack)
-								break
-							else:
-								if verbose: print("Partial Hit: alert source IP "+alert['src_addr']+" does not match")
-								false_pos_alerts.append(alert)
+				# match IP address
+				if ((alert['src_addr'] == attack['attacker_ip']) and (alert['dst_addr'] == attack['victim_ip'])) or \
+				   ((alert['src_addr'] == attack['victim_ip']) and (alert['dst_addr'] == attack['attacker_ip'])):
 
-						elif (alert['src_addr'] == attack['attacker_ip'] or alert['src_addr'] == attack['victim_ip']):
-							if verbose: print("Partial Hit: alert destination IP "+alert['dst_addr']+" does not match")
-							false_pos_alerts.append(alert)
-					
-						else: # this is an alert that falls in time range but doesn't have an IP matches = false positive
-							if verbose: print("False Positive: alert falls within attack time range but IP does not match")
-							false_pos_alerts.append(alert)
+					# match ports, sometimes truth doesn't specify ports! So we're less strict with this one
+					if (alert['src_port'] in attack['ports']) or (alert['dst_port'] in attack['ports']) or (attack['ports'] == []):	
+
+						# match time range
+						# NOTE this uses the truth data duration, if something shows up in the data beyond that duration we don't count it...
+						if (attack['min_search_time'] < alert['date_time'] and alert['date_time'] < attack['max_search_time']):
+							if verbose: print("Alert match with attack "+attack['attack_name'])
+							true_pos_alerts.append(alert)
+							true_pos_attacks.append(attack)
+							tp = True
+							break
+
+						else:
+							if verbose: print("Partial match, alert didn't fall within time window: \nAlert: "+str(alert)+"\nAttack:"+str(attack))
 					else:
-						if verbose: print("False Positive: alert falls within attack time range but port does not match")
-						false_pos_alerts.append(alert)
+						if verbose: print("Partial match, alert didn't share any ports: \nAlert: "+str(alert)+"\nAttack:"+str(attack))
+				
+			# this is an alert that falls in time range but doesn't have an IP matches = false positive
+			if not tp:
+				if verbose: print("False Positive: alert does not match any attack sufficiently "+str(alert))
+				false_pos_alerts.append(alert)
+					
 
 	# get the list of false negatives attacks (one's that weren't alerted on)
-	for attack in attacks:
-		for valid_attack in valid_attacks:
-			if not cmp(attack, valid_attack):	# if a truth attack matches one of the 'valid' detected ones (true positive), then remove it...
-				attacks.remove(attack)
+	num_attacks = len(attacks)
+	i = 0
+	while i < len(attacks):
+		for true_pos_attack in true_pos_attacks:
+			if (attacks[i]['attack_name'] == true_pos_attack['attack_name']):	# if a truth attack matches one of the 'valid' detected ones (true positive), then remove it...
+				attacks.remove(attacks[i])
+				i = i - 1
 				break
+		i += 1
 	# ... what's left over in 'attacks' list are the false negatives
-	return true_pos_alerts, false_pos_alerts, attacks, valid_attacks
+	false_neg_attacks = attacks
+
+	if debug: print("[DEBUG] parseSguilAlerts() run time: "+str(time.time()-t0)+" seconds")
+	return true_pos_alerts, false_pos_alerts, false_neg_attacks, true_pos_attacks
 
 
 
-# to create parsable data from pcap file:
+# to create parsable data from pcap file, use 'argus' and 'ra' utilies to pre-process:
 #	argus -r inside.tcpdump -w argus.raw
 #	cat argus.raw | ra -n -c ';'  > argus.txt
 def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_attacks):
-	print("Parsing argus data...")
-	t0 = time.time()
+	if debug: print("[DEBUG] Parsing argus data..."); t0 = time.time()
 
 	# there's no date in the raw data, so you have to hard code an initial date and then keep track of time roll over....
 	date = datetime.strptime("1999-03-31", "%Y-%m-%d").date()
@@ -150,12 +164,20 @@ def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_atta
 	tp = False
 	fp = False
 	fn = False
-	true_neg_traffic = {'num_pkts':0, 'argus_lines':0, 'total_lines':0, 'total_pkts':0}
+	true_neg_traffic = {'num_pkts':0, 'connections':0, 'total_file_pkts':0}
 
 	# parse argus line for information, try to match against alerts
+	count = 1.0
+	total = len(argus_text)
 	for line in argus_text:
-		pieces = line.split(';')
+		if debug: 	# print a percentage complete so you know it's still working...
+			sys.stdout.write('\r')
+			sys.stdout.write("[DEBUG] [%-20s] %d%%" % ('#'*int((count/total)*20), int((count/total)*100)))
+			sys.stdout.flush()
+			count += 1
+
 		try:
+			pieces = line.split(';')
 			# comparison with alerts is only valid to second resolution, some of the argus lines are not time ordered on microsecond level
 			start_time = pytz.utc.localize(datetime.strptime(pieces[0], "%H:%M:%S.%f").time().replace(microsecond=0))
 			# b/c we have to keep track of time and roll over dates, this should only evaluate true when timestamps stradle midnight!
@@ -169,24 +191,24 @@ def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_atta
 			dst_addr = pieces[6]
 			dst_port = pieces[7]
 			num_pkts = int(pieces[8])
-			true_neg_traffic['total_lines'] = true_neg_traffic['total_lines'] + 1	# count lines in file
-			true_neg_traffic['total_pkts'] = true_neg_traffic['total_pkts'] + num_pkts	# count packets in file
+			true_neg_traffic['total_file_pkts'] = true_neg_traffic['total_file_pkts'] + num_pkts	# count packets in file
 			
+
 			# check if this argus line/packets belongs to any true positive alerts
 			for idx, val in enumerate(true_pos_alerts):
 				# Can't guarentee src/dst in order from sguil.log so have to check either/or
-				if ((src_addr == true_pos_alerts[idx]['src_addr']) and (dst_addr == true_pos_alerts[idx]['dst_addr'])) or\
-				   ((src_addr == true_pos_alerts[idx]['dst_addr']) and (dst_addr == true_pos_alerts[idx]['src_addr'])):
+				if ((src_addr == val['src_addr']) and (dst_addr == val['dst_addr'])) or\
+				   ((src_addr == val['dst_addr']) and (dst_addr == val['src_addr'])):
 
-					if ((src_port == true_pos_alerts[idx]['src_port']) and (dst_port == true_pos_alerts[idx]['dst_port'])) or\
-			    	   ((src_port == true_pos_alerts[idx]['dst_port']) and (dst_port == true_pos_alerts[idx]['src_port'])):
+					if ((src_port == val['src_port']) and (dst_port == val['dst_port'])) or\
+			    	   ((src_port == val['dst_port']) and (dst_port == val['src_port'])):
 	
 						# FIXME this evaluation is costly, much more than the above comparisons. If evaluated first takes 36s as opposed to 9s
 						# Test absolute time difference < some tolerance, shouldn't be any real difference between pcap and alert
-						if (abs(date_time - true_pos_alerts[idx]['datetime']) < timedelta(hours=0,minutes=0,seconds=60)):
-							true_pos_alerts[idx]['num_pkts'] = true_pos_alerts[idx]['num_pkts'] + num_pkts
-							true_pos_alerts[idx]['argus_lines'] = true_pos_alerts[idx]['argus_lines'] + 1
-							print(true_pos_alerts[idx])
+						if (abs(date_time - val['date_time']) < timedelta(hours=0,minutes=0,seconds=60)):
+							true_pos_alerts[idx]['num_pkts'] = val['num_pkts'] + num_pkts
+							true_pos_alerts[idx]['connections'] = val['connections'] + 1
+							#print(true_pos_alerts[idx])
 							tp = True
 							break	# FIXME 1 argus line might match more than 1 Snort/Sguil alert...
 
@@ -196,14 +218,14 @@ def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_atta
 			else:	# else check if this line/packets belongs to any false positive alerts.
 				# FIXME this section adds 55s
 				for idx, val in enumerate(false_pos_alerts):
-					if ((src_addr == false_pos_alerts[idx]['src_addr']) and (dst_addr == false_pos_alerts[idx]['dst_addr'])) or\
-				   	   ((src_addr == false_pos_alerts[idx]['dst_addr']) and (dst_addr == false_pos_alerts[idx]['src_addr'])):
-						if ((src_port == false_pos_alerts[idx]['src_port']) and (dst_port == false_pos_alerts[idx]['dst_port'])) or\
-						   ((src_port == false_pos_alerts[idx]['dst_port']) and (dst_port == false_pos_alerts[idx]['src_port'])):
+					if ((src_addr == val['src_addr']) and (dst_addr == val['dst_addr'])) or\
+				   	   ((src_addr == val['dst_addr']) and (dst_addr == val['src_addr'])):
+						if ((src_port == val['src_port']) and (dst_port == val['dst_port'])) or\
+						   ((src_port == val['dst_port']) and (dst_port == val['src_port'])):
 							# FIXME this evaluation is costly, much more than the above comparisons.
-							if (abs(date_time - false_pos_alerts[idx]['datetime']) < timedelta(hours=0,minutes=0,seconds=20)):
-								false_pos_alerts[idx]['num_pkts'] = false_pos_alerts[idx]['num_pkts'] + num_pkts
-								false_pos_alerts[idx]['argus_lines'] = false_pos_alerts[idx]['argus_lines'] + 1
+							if (abs(date_time - val['date_time']) < timedelta(hours=0,minutes=0,seconds=20)):
+								false_pos_alerts[idx]['num_pkts'] = val['num_pkts'] + num_pkts
+								false_pos_alerts[idx]['connections'] = val['connections'] + 1
 								fp = True
 								break
 				
@@ -212,13 +234,22 @@ def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_atta
 				
 				else:	# else check if this line/packets belongs to any attacks that weren't detected (false negatives)
 					for idx, val in enumerate(false_neg_attacks):
-						if ((src_port in false_neg_attacks[idx]['ports']) or (dst_port in false_neg_attacks[idx]['ports'])):
-							if ((src_addr == false_neg_attacks[idx]['attacker_ip']) and (dst_addr == false_neg_attacks[idx]['victim_ip'])) or \
-							   ((src_addr == false_neg_attacks[idx]['victim_ip']) and (dst_addr == false_neg_attacks[idx]['attacker_ip'])):
+						if ((src_port in val['ports']) or (dst_port in val['ports'])):
+							if ((src_addr == val['attacker_ip']) and (dst_addr == val['victim_ip'])) or \
+							   ((src_addr == val['victim_ip']) and (dst_addr == val['attacker_ip'])):
 								# FIXME this evaluation is costly, much more than the above comparisons.
-								if (abs(date_time - false_neg_attacks[idx]['datetime']) < timedelta(hours=0,minutes=0,seconds=20)):
-									false_neg_attacks[idx]['num_pkts'] = false_neg_attacks[idx]['num_pkts'] + num_pkts
-									false_neg_attacks[idx]['argus_lines'] = false_neg_attacks[idx]['argus_lines'] + 1
+								if (abs(date_time - val['date_time']) < timedelta(hours=0,minutes=0,seconds=20)):
+									false_neg_attacks[idx]['num_pkts'] = val['num_pkts'] + num_pkts
+									false_neg_attacks[idx]['connections'] = val['connections'] + 1
+									false_neg_attacks[idx]['detections'].append({'date_time':date_time, 'protocol':protocol, 'src_addr':src_addr, 'src_port':src_port, 'dst_addr':dst_addr, 'dst_port':dst_port,'num_pkts':num_pkts})
+									'''
+									false_neg_attacks[idx]['real_times'].append(date_time)
+									false_neg_attacks[idx]['protocol'].append(protocol)
+									false_neg_attacks[idx]['src_addr'].append(src_addr)
+									false_neg_attacks[idx]['src_port'].append(src_port)
+									false_neg_attacks[idx]['dst_addr'].append(dst_addr)
+									false_neg_attacks[idx]['dst_port'].append(dst_port)
+									'''
 									fn = True
 									break
 
@@ -227,7 +258,7 @@ def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_atta
 
 					else:	# only option left is that the argus line/packets are true negatives
 						true_neg_traffic['num_pkts'] = true_neg_traffic['num_pkts'] + num_pkts
-						true_neg_traffic['argus_lines'] = true_neg_traffic['argus_lines'] + 1
+						true_neg_traffic['connections'] = true_neg_traffic['connections'] + 1
 					#	true_neg_traffic.append(argus)
 					
 		except Exception as e: print("[WARNING] Couldn't parse line: "+str(e))
@@ -238,7 +269,7 @@ def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_atta
 
 
 if __name__ == "__main__":
-	print("Running IDS validation routine...")
+	if debug: print("[DEBUG] Running IDS validation routine..."); t0 = time.time()
 
 	# read command line args
 	if len(sys.argv) == 4:
@@ -257,27 +288,31 @@ if __name__ == "__main__":
 	attacks = parseTruthData(truth_text) 
 
 	# parse Sguil log messages for alerts
-	true_pos_alerts, false_pos_alerts, false_neg_attacks, valid_attacks = parseSguilAlerts(detection_text, attacks)	
-	if debug: print("# of true positive alerts:   "+str(len(true_pos_alerts)))
-	if debug: print("# of false positive alerts:  "+str(len(false_pos_alerts)))
-	if debug: print("# of false negative attacks: "+str(len(false_neg_attacks)))
-	
-	# attribute packets and sessions (argus lines) with true pos, false pos, false neg, and true neg alerts/attacks
+	true_pos_alerts, false_pos_alerts, false_neg_attacks, true_pos_attacks = parseSguilAlerts(detection_text, attacks)	
+	if debug:
+		print("")
+		print("# of true positive alerts:   "+str(len(true_pos_alerts)))
+		print("# of false positive alerts:  "+str(len(false_pos_alerts)))
+		print("# of false negative attacks: "+str(len(false_neg_attacks)))
+		print("")
+		
+	# attribute packets and connections (argus lines) with true pos, false pos, false neg, and true neg alerts/attacks
 	true_pos_alerts, false_pos_alerts, false_neg_attacks, true_neg_traffic = parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_attacks)
 
 	if debug: 
-		tp_lines = sum(item['argus_lines'] for item in true_pos_alerts)
-		fp_lines = sum(item['argus_lines'] for item in false_pos_alerts)
-		fn_lines = sum(item['argus_lines'] for item in false_neg_attacks)
-		tn_lines = true_neg_traffic['argus_lines']
+		tp_lines = sum(item['connections'] for item in true_pos_alerts)
+		fp_lines = sum(item['connections'] for item in false_pos_alerts)
+		fn_lines = sum(item['connections'] for item in false_neg_attacks)
+		tn_lines = true_neg_traffic['connections']
 		total_lines = tp_lines+fp_lines+fn_lines+tn_lines
-		print("# of argus lines corresponding to")
+		print("")
+		print("# of connections (argus lines) corresponding to")
 		print("  true positive alerts:   "+str(tp_lines))
 		print("  false positive alerts:  "+str(fp_lines))
 	 	print("  false negative attacks: "+str(fn_lines))
 	 	print("  true negative traffic:  "+str(tn_lines))
 	 	print("  total acounted for:     "+str(total_lines))
-		print("  total in file:          "+str(true_neg_traffic['total_lines'])+"\n")
+		print("  total in file:          "+str(len(argus_text)-1)+"\n")
 		tp_pkts = sum(item['num_pkts'] for item in true_pos_alerts)
 		fp_pkts = sum(item['num_pkts'] for item in false_pos_alerts)
 		fn_pkts = sum(item['num_pkts'] for item in false_neg_attacks)
@@ -289,19 +324,58 @@ if __name__ == "__main__":
 	 	print("  false negative attacks: "+str(fn_pkts))
 	 	print("  true negative traffic:  "+str(tn_pkts))
 	 	print("  total acounted for:     "+str(total_pkts))
-		print("  total in file:          "+str(true_neg_traffic['total_pkts'])+"\n")
+		print("  total in file:          "+str(true_neg_traffic['total_file_pkts']))
+		print("")
 
-	#sys.exit(0)
-	# print valid alerts
-	print("\n		Truth Data		        Alert Data")
+	# print true positive alerts, with truth data for reference
+	print("###############################################################################")
+	print("               Truth Data		     True Positive Alerts")
+	last_attack_name = true_pos_attacks[0]['attack_name']
+	total_attack_connections = 0
+	total_attack_packet = 0
 	for idx, val in enumerate(true_pos_alerts):
+		# have to track this here because of how I tracked true positive alerts and attacks
+		if (true_pos_attacks[idx]['attack_name'] != last_attack_name):
+			print("## Total number of connections associated with attack "+last_attack_name+":   "+str(total_attack_connections))
+			print("## Total number of packets associated with attack "+last_attack_name+":   "+str(total_attack_packet))
+			print("")
+			last_attack_name = true_pos_attacks[idx]['attack_name']
+			total_attack_connections = 0
+			total_attack_packet = 0
+		total_attack_connections += val['connections']
+		total_attack_packet += val['num_pkts']
 		print(\
-"Name:          "+valid_attacks[idx]['attack_name']+"			"+true_pos_alerts[idx]['reason']+"\n"+\
-"Date:          "+str(valid_attacks[idx]['datetime'].date())+"			"+str(true_pos_alerts[idx]['datetime'].date())+"\n"+\
-"Time:          "+str(valid_attacks[idx]['datetime'].time())+"  +"+str(valid_attacks[idx]['duration'])+"		"+str(true_pos_alerts[idx]['datetime'].time())+"\n"+\
-"Addr:          "+valid_attacks[idx]['attacker_ip']+"			"+true_pos_alerts[idx]['src_addr']+"\n"+\
-"	"+valid_attacks[idx]['victim_ip']+"			"+true_pos_alerts[idx]['dst_addr']+"\n"+\
-"Port:          "+str(valid_attacks[idx]['ports'])+"				"+true_pos_alerts[idx]['src_port']+", "+true_pos_alerts[idx]['dst_port']+"\n"\
-"Num Packets:   ?				"+str(true_pos_alerts[idx]['num_pkts'])+"\n"\
-"Argus Lines:   ?				"+str(true_pos_alerts[idx]['argus_lines'])+"\n")
+"Name:          "+"{:<30}".format(true_pos_attacks[idx]['attack_name'])+val['reason']+"\n"+\
+"Date:          "+"{:<30}".format(str(true_pos_attacks[idx]['date_time'].date()))+str(val['date_time'].date())+"\n"+\
+"Time:          "+"{:<30}".format(str(true_pos_attacks[idx]['date_time'].time())+"  +"+str(true_pos_attacks[idx]['duration']))+str(val['date_time'].time())+"\n"+\
+"Addr:          "+"{:<30}".format(true_pos_attacks[idx]['attacker_ip'])+val['src_addr']+"\n"+\
+"               "+"{:<30}".format(true_pos_attacks[idx]['victim_ip'])+val['dst_addr']+"\n"+\
+"Port:          "+"{:<30}".format(str(true_pos_attacks[idx]['ports']))+val['src_port']+", "+val['dst_port']+"\n"\
+"Num Packets:   "+"{:<30}".format("?")+str(val['num_pkts'])+"\n"\
+"Connections:   "+"{:<30}".format("?")+str(val['connections'])+"\n")
+
+	print("## Total number of connections associated with attack "+last_attack_name+":   "+str(total_attack_connections))
+	print("## Total number of packets associated with attack "+last_attack_name+":   "+str(total_attack_packet))
+	print("")
+
+	# print false negative argus data, with truth data for reference
+	# this prints *per connection* detected by argus, so you'll see repeated truth data attacks for every detected connection that matches
+	print("###############################################################################")
+	print("               Truth Data		     False Negative Argus Connections")
+	for idx, val in enumerate(false_neg_attacks):
+		for idx2, val2 in enumerate(val['detections']):
+			print(\
+"Name:          "+"{:<30}".format(val['attack_name'])+val2['protocol']+"\n"+\
+"Date:          "+"{:<30}".format(str(val['date_time'].date()))+str(val2['date_time'].date())+"\n"+\
+"Time:          "+"{:<30}".format(str(val['date_time'].time())+"  +"+str(val['duration']))+str(val2['date_time'].time())+"\n"+\
+"Addr:          "+"{:<30}".format(val['attacker_ip'])+val2['src_addr']+"\n"+\
+"               "+"{:<30}".format(val['victim_ip'])+val2['dst_addr']+"\n"+\
+"Port:          "+"{:<30}".format(str(val['ports']))+val2['src_port']+", "+val2['dst_port']+"\n"\
+"Num Packets:   "+"{:<30}".format("?")+str(val2['num_pkts'])+"\n")
+
+		print("## Total number of connections associated with attack "+val['attack_name']+":   "+str(val['connections']))
+		print("## Total number of packets associated with attack "+val['attack_name']+":   "+str(val['num_pkts']))
+		print("")
+
+	if debug: print("[DEBUG] Total wall clock run time: "+str(time.time()-t0)+" seconds")
 
