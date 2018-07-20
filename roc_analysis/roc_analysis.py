@@ -2,8 +2,14 @@
 
 from __future__ import print_function
 import matplotlib.pyplot as plt
+import plotly.graph_objs as go
+import plotly
 import numpy as np
 import sys
+
+# turn on grids for matplotlib
+plt.rcParams['axes.grid'] = True
+plt.rcParams['axes.axisbelow'] = True
 
 
 def runRocAnalysis(events):
@@ -17,15 +23,24 @@ def runRocAnalysis(events):
 
 	# plot event graph
 	plt.figure(0)
-	pos = plt.scatter(p_idx,p_val,s=50,c='blue')	# positive
-	neg = plt.scatter(n_idx,n_val,s=50,c='green')	# negative
+	pos = plt.scatter(p_idx,p_val,s=50,c='blue',edgecolor='black',linewidths=0.5)	# positive
+	neg = plt.scatter(n_idx,n_val,s=50,c='green',edgecolor='black',linewidths=0.5)	# negative
 	plt.axis([0, (len(n_idx)+1), 0, 1.1])
-	plt.legend([pos, neg],['Anomalous', 'Normal'], bbox_to_anchor=(1.04, 1), loc='upper left', ncol=1)
+	plt.legend([pos, neg],['Anomalous', 'Normal'], bbox_to_anchor=(0., .9, 1., .1), loc='upper center', ncol=2)
 	plt.suptitle('Event Graph w/ Truth')
 	plt.xlabel('Event')
 	plt.ylabel('Score')
-	plt.savefig('event_graph.jpg')
+	plt.savefig('event_graph.png')
 	plt.show(block=False)
+
+	# create HTML event plot with plotly
+	z = []
+	for i in p_idx:
+		z.append('blue')
+	for i in n_idx:
+		z.append('green')
+	trace1 = go.Scatter(x=np.append(p_idx,n_idx), y=np.append(p_val,n_val), mode='markers', marker=dict(size=16, color=z, showscale=True))
+	plotly.offline.plot([trace1], filename='event_graph.html')
 
 	data = np.array([])
 	step_size = 5
@@ -57,6 +72,8 @@ def runRocAnalysis(events):
 
 	# confusion data matrix
 	print(data)
+	# save as .csv file
+	np.savetxt("confusion_matrix.csv", data, delimiter=",")
 
 	# optimal ROC threshold
 	x = data[:,1]	# false positive rate
@@ -67,13 +84,17 @@ def runRocAnalysis(events):
 
 	# plot ROC
 	plt.figure(1)
-	roc = plt.scatter(x,y,c=z,s=50,cmap='RdYlGn')
+	roc = plt.scatter(x,y,c=z,s=50,cmap='RdYlGn',edgecolor='black',linewidths=0.5)
 	plt.axis([0, 1.1, 0, 1.1])
 	plt.suptitle('ROC Graph')
 	plt.xlabel('FP rate')
 	plt.ylabel('TP rate')
-	plt.savefig('roc_graph.jpg')
+	plt.savefig('roc_graph.png')
 	plt.show(block=False)
+
+	# create HTML ROC plot with plotly
+	trace2 = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale='Viridis', showscale=True))
+	plotly.offline.plot([trace2], filename='roc_graph.html')
 
 	# optimal precision-recall threshold
 	x = data[:,4]	# recall
@@ -84,13 +105,17 @@ def runRocAnalysis(events):
 
 	# plot precision-recall
 	plt.figure(2)
-	roc = plt.scatter(x,y,c=z,s=50,cmap='RdYlGn')
+	roc = plt.scatter(x,y,c=z,s=50,cmap='RdYlGn',edgecolor='black',linewidths=0.5)
 	plt.axis([0, 1.1, 0, 1.1])	
 	plt.suptitle('Precision-Recall Graph')
 	plt.xlabel('Recall')
 	plt.ylabel('Precision')
-	plt.savefig('pr_graph.jpg')
+	plt.savefig('pr_graph.png')
 	plt.show(block=False)
+
+	# create HTML PR plot with plotly
+	trace3 = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale='Viridis', showscale=True))
+	plotly.offline.plot([trace3], filename='pr_graph.html')
 
 	# optimal accuracy threshold
 	x = data[:,0]	# threshold
@@ -101,13 +126,16 @@ def runRocAnalysis(events):
 
 	# plot accuracy
 	plt.figure(3)
-	roc = plt.scatter(x,y,c=z,s=50,cmap='RdYlGn')
-	plt.axis([0, 1.1, 0, 1.1])	
+	roc = plt.scatter(x,y,c=z,s=50,cmap='RdYlGn',edgecolor='black',linewidths=0.5)
+	plt.axis([0, 1.1, 0, 1.1])
 	plt.suptitle('Accuracy Graph')
 	plt.xlabel('Threshold')
 	plt.ylabel('Accuracy')
-	plt.savefig('pr_graph.jpg')
-	plt.show(block=True)
+	plt.savefig('accuracy_graph.png')
+
+	# create HTML Accuracy plot with plotly
+	trace4 = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale='Viridis', showscale=True))
+	plotly.offline.plot([trace4], filename='accuracy_graph.html')
 
 	if (opt_roc == opt_pre_re == opt_acc):
 		print("Threshold "+str(opt_roc)+" is optimal, all metrics agreed")
@@ -115,7 +143,8 @@ def runRocAnalysis(events):
 		print("Threshold "+str(opt_roc)+" is likely optimal, all metrics within 1 step_size")
 	else:
 		print("Threshold optimum unsure, all metrics differ")
-	
+
+	plt.show(block=True)
 	return(data)
 
 

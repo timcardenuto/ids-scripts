@@ -1,0 +1,10 @@
+accuracy_graph.html filter=lfs diff=lfs merge=lfs -text
+event_graph.html filter=lfs diff=lfs merge=lfs -text
+pr_graph.html filter=lfs diff=lfs merge=lfs -text
+README.html filter=lfs diff=lfs merge=lfs -text
+roc_graph.html filter=lfs diff=lfs merge=lfs -text
+accuracy_graph.png filter=lfs diff=lfs merge=lfs -text
+event_graph.png filter=lfs diff=lfs merge=lfs -text
+pr_graph.png filter=lfs diff=lfs merge=lfs -text
+roc_graph.png filter=lfs diff=lfs merge=lfs -text
+README.pdf filter=lfs diff=lfs merge=lfs -text
