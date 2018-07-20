@@ -14,6 +14,9 @@ endif::[]
 ifdef::backend-pdf[]
 image::event_graph.png[]
 endif::[]
+ifdef::env-github[]
+image: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images/event_graph.png[]
+endif::[]
 
 
 == ROC curve
@@ -25,6 +28,9 @@ ifndef::backend-pdf[]
 endif::[]
 ifdef::backend-pdf[]
 image::roc_graph.png[]
+endif::[]
+ifdef::env-github[]
+image: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images/roc_graph.png[]
 endif::[]
 
 
@@ -38,6 +44,9 @@ endif::[]
 ifdef::backend-pdf[]
 image::pr_graph.png[]
 endif::[]
+ifdef::env-github[]
+image: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images/pr_graph.png[]
+endif::[]
 
 
 == Accuracy curve
@@ -50,3 +59,8 @@ endif::[]
 ifdef::backend-pdf[]
 image::accuracy_graph.png[]
 endif::[]
+ifdef::env-github[]
+image: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images/accuracy_graph.png[]
+endif::[]
+
+

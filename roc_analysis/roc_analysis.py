@@ -30,7 +30,7 @@ def runRocAnalysis(events):
 	plt.suptitle('Event Graph w/ Truth')
 	plt.xlabel('Event')
 	plt.ylabel('Score')
-	plt.savefig('event_graph.png')
+	plt.savefig('images/event_graph.png')
 	plt.show(block=False)
 
 	# create HTML event plot with plotly
@@ -40,7 +40,7 @@ def runRocAnalysis(events):
 	for i in n_idx:
 		z.append('green')
 	trace1 = go.Scatter(x=np.append(p_idx,n_idx), y=np.append(p_val,n_val), mode='markers', marker=dict(size=16, color=z, showscale=True))
-	plotly.offline.plot([trace1], filename='event_graph.html')
+	plotly.offline.plot([trace1], filename='images/event_graph.html')
 
 	data = np.array([])
 	step_size = 5
@@ -89,12 +89,12 @@ def runRocAnalysis(events):
 	plt.suptitle('ROC Graph')
 	plt.xlabel('FP rate')
 	plt.ylabel('TP rate')
-	plt.savefig('roc_graph.png')
+	plt.savefig('images/roc_graph.png')
 	plt.show(block=False)
 
 	# create HTML ROC plot with plotly
 	trace2 = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale='Viridis', showscale=True))
-	plotly.offline.plot([trace2], filename='roc_graph.html')
+	plotly.offline.plot([trace2], filename='images/roc_graph.html')
 
 	# optimal precision-recall threshold
 	x = data[:,4]	# recall
@@ -110,12 +110,12 @@ def runRocAnalysis(events):
 	plt.suptitle('Precision-Recall Graph')
 	plt.xlabel('Recall')
 	plt.ylabel('Precision')
-	plt.savefig('pr_graph.png')
+	plt.savefig('images/pr_graph.png')
 	plt.show(block=False)
 
 	# create HTML PR plot with plotly
 	trace3 = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale='Viridis', showscale=True))
-	plotly.offline.plot([trace3], filename='pr_graph.html')
+	plotly.offline.plot([trace3], filename='images/pr_graph.html')
 
 	# optimal accuracy threshold
 	x = data[:,0]	# threshold
@@ -131,11 +131,11 @@ def runRocAnalysis(events):
 	plt.suptitle('Accuracy Graph')
 	plt.xlabel('Threshold')
 	plt.ylabel('Accuracy')
-	plt.savefig('accuracy_graph.png')
+	plt.savefig('images/accuracy_graph.png')
 
 	# create HTML Accuracy plot with plotly
 	trace4 = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale='Viridis', showscale=True))
-	plotly.offline.plot([trace4], filename='accuracy_graph.html')
+	plotly.offline.plot([trace4], filename='images/accuracy_graph.html')
 
 	if (opt_roc == opt_pre_re == opt_acc):
 		print("Threshold "+str(opt_roc)+" is optimal, all metrics agreed")
