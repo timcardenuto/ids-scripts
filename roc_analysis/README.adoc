@@ -1,4 +1,10 @@
 :source-highlighter: pygments
+ifdef::env-github[]
+:imagesdir: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images
+endif::[]
+ifndef::env-github[]
+:imagesdir: images
+endif::[]
 
 = Receiver Operating Characteristics (ROC)
 
@@ -8,14 +14,14 @@
 
 ifndef::backend-pdf[]
 ++++
-<iframe width="100%", height="600", src="event_graph.html" name="targetframe" allowTransparency="true" scrolling="no" frameborder="0"> </iframe>
+<iframe width="100%", height="600", src="docs/event_graph.html" name="targetframe" allowTransparency="true" scrolling="no" frameborder="0"> </iframe>
 ++++
 endif::[]
 ifdef::backend-pdf[]
 image::event_graph.png[]
 endif::[]
 ifdef::env-github[]
-image: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images/event_graph.png[]
+image::event_graph.png[]
 endif::[]
 
 
@@ -23,14 +29,14 @@ endif::[]
 
 ifndef::backend-pdf[]
 ++++
-<iframe width="100%", height="600", src="roc_graph.html" name="targetframe" allowTransparency="true" scrolling="no" frameborder="0"> </iframe>
+<iframe width="100%", height="600", src="docs/roc_graph.html" name="targetframe" allowTransparency="true" scrolling="no" frameborder="0"> </iframe>
 ++++
 endif::[]
 ifdef::backend-pdf[]
 image::roc_graph.png[]
 endif::[]
 ifdef::env-github[]
-image: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images/roc_graph.png[]
+image::roc_graph.png[]
 endif::[]
 
 
@@ -38,14 +44,14 @@ endif::[]
 
 ifndef::backend-pdf[]
 ++++
-<iframe width="100%", height="600", src="pr_graph.html" name="targetframe" allowTransparency="true" scrolling="no" frameborder="0"> </iframe>
+<iframe width="100%", height="600", src="docs/pr_graph.html" name="targetframe" allowTransparency="true" scrolling="no" frameborder="0"> </iframe>
 ++++
 endif::[]
 ifdef::backend-pdf[]
 image::pr_graph.png[]
 endif::[]
 ifdef::env-github[]
-image: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images/pr_graph.png[]
+image::pr_graph.png[]
 endif::[]
 
 
@@ -53,14 +59,14 @@ endif::[]
 
 ifndef::backend-pdf[]
 ++++
-<iframe width="100%", height="600", src="accuracy_graph.html" name="targetframe" allowTransparency="true" scrolling="no" frameborder="0"> </iframe>
+<iframe width="100%", height="600", src="docs/accuracy_graph.html" name="targetframe" allowTransparency="true" scrolling="no" frameborder="0"> </iframe>
 ++++
 endif::[]
 ifdef::backend-pdf[]
 image::accuracy_graph.png[]
 endif::[]
 ifdef::env-github[]
-image: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images/accuracy_graph.png[]
+image::accuracy_graph.png[]
 endif::[]
 
 
