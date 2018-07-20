@@ -1,6 +1,6 @@
 :source-highlighter: pygments
 ifdef::env-github[]
-:imagesdir: https://github.com/timcardenuto/ids-scripts/tree/master/roc_analysis/images
+:imagesdir: https://github.com/timcardenuto/ids-scripts/blob/master/roc_analysis/images
 endif::[]
 ifndef::env-github[]
 :imagesdir: images
