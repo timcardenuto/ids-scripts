@@ -3,11 +3,17 @@
 from __future__ import print_function
 from builtins import input
 import matplotlib.pyplot as plt
-import plotly.graph_objs as go
-import plotly
 import numpy as np
 import math
 import sys
+try:
+	import plotly.graph_objs as go
+	import plotly
+	noply = False
+except ImportError:
+	print("Running without Plotly support")
+	noply = True
+
 
 # turn on matplotlib grids
 plt.rcParams['axes.grid'] = True
@@ -16,12 +22,35 @@ plt.rcParams['axes.axisbelow'] = True
 plt.ion()
 
 
+# generates a CSV numpy matrix mimicking the events data example based on just the total values from IDS binary classification
+# since there's no score, just 0 or 1
+def generateMatrix(tp, fp, fn, tn):
+	f_handle = file('snort_confusion_matrix.csv', 'a')
+	data = np.array([1,1])
+	for val in range(tp-1):
+		data = np.vstack([data, [1,1]])
+	np.savetxt(f_handle, data, delimiter=',')
+	print('tp')
+	data = np.array([1,0])
+	for val in range(fp-1):
+		data = np.vstack([data, [1,0]])
+	np.savetxt(f_handle, data, delimiter=',')
+	print('fp')
+	data = np.array([0,1])
+	for val in range(fn):
+		data = np.vstack([data, [0,1]])
+	np.savetxt(f_handle, data, delimiter=',')
+	print('fn')
+	#for val in range(tn):
+	#	data = np.vstack([data, [0,0]])	
+	f_handle.close()		
+
+
 # events is a numpy matrix where each row contains a score between 0 and 1, and the truth state value true(1) or false(0)
-def runAnalysis(events, save=False, plot=False):
+def runAnalysis(events, threshold_step, plot=False, save=False):
 
 	data = np.array([])				# store the 'super' confusion matrix with all calculation combinations
-	step_size = 5
-	for val in range(5,100,step_size):
+	for val in range(threshold_step,100,threshold_step):
 		threshold = val/100.0
 		true_positive = 0.0
 		false_positive = 0.0
@@ -110,8 +139,8 @@ def runAnalysis(events, save=False, plot=False):
 
 	if (opt_roc == opt_pre_re == opt_acc):
 		print("Threshold "+str(opt_roc)+" is optimal, all metrics agreed")
-	elif (abs(opt_roc-opt_pre_re) <= step_size) and (abs(opt_roc-opt_acc) <= step_size):
-		print("Threshold "+str(opt_roc)+" is likely optimal, all metrics within 1 step_size")
+	elif (abs(opt_roc-opt_pre_re) <= threshold_step) and (abs(opt_roc-opt_acc) <= threshold_step):
+		print("Threshold "+str(opt_roc)+" is likely optimal, all metrics within 1 threshold_step")
 	else:
 		print("Threshold optimum unsure, all metrics differ")
 
@@ -154,11 +183,12 @@ def plotEventGraph(events, save=False):
 	if save:
 		plt.savefig('images/event_graph.png')
 		# create HTML event plot with plotly
-		trace1 = go.Scatter(x=p_idx, y=p_val, name = 'Anomalous', mode='markers', marker=dict(size=16, color='green'))
-		trace2 = go.Scatter(x=n_idx, y=n_val, name = 'Normal', mode='markers', marker=dict(size=16, color='blue'))
-		layout = go.Layout(title='Event Graph w/ Truth', xaxis=dict(title='Event', titlefont=dict(size=18)), yaxis=dict(title='Score', titlefont=dict(size=18)))
-		fig = go.Figure(data=[trace1, trace2], layout=layout)
-		plotly.offline.plot(fig, filename='docs/event_graph.html')
+		if not noply:
+			trace1 = go.Scatter(x=p_idx, y=p_val, name = 'Anomalous', mode='markers', marker=dict(size=16, color='green'))
+			trace2 = go.Scatter(x=n_idx, y=n_val, name = 'Normal', mode='markers', marker=dict(size=16, color='blue'))
+			layout = go.Layout(title='Event Graph w/ Truth', xaxis=dict(title='Event', titlefont=dict(size=18)), yaxis=dict(title='Score', titlefont=dict(size=18)))
+			fig = go.Figure(data=[trace1, trace2], layout=layout)
+			plotly.offline.plot(fig, filename='docs/event_graph.html')
 
 
 
@@ -184,10 +214,11 @@ def plotROC(x, y, z, save=False):
 	if save:
 		plt.savefig('images/roc_graph.png')
 		# create HTML ROC plot with plotly
-		trace = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale=[[0, 'rgb(255, 0, 0)'], [0.5, 'rgb(255, 255, 0)'], [1.0, 'rgb(0, 128, 0)']], showscale=True))
-		layout = go.Layout(title='Receiver Operating Characteristics (ROC)', xaxis=dict(title='False Positive Rate (FPR)', titlefont=dict(size=18)), yaxis=dict(title='True Positive Rate (TPR)', titlefont=dict(size=18)))
-		fig = go.Figure(data=[trace], layout=layout)
-		plotly.offline.plot(fig, filename='docs/roc_graph.html')
+		if not noply:
+			trace = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale=[[0, 'rgb(255, 0, 0)'], [0.5, 'rgb(255, 255, 0)'], [1.0, 'rgb(0, 128, 0)']], showscale=True))
+			layout = go.Layout(title='Receiver Operating Characteristics (ROC)', xaxis=dict(title='False Positive Rate (FPR)', titlefont=dict(size=18)), yaxis=dict(title='True Positive Rate (TPR)', titlefont=dict(size=18)))
+			fig = go.Figure(data=[trace], layout=layout)
+			plotly.offline.plot(fig, filename='docs/roc_graph.html')
 
 
 # plot precision-recall curve
@@ -203,10 +234,11 @@ def plotPR(x, y, z, save=False):
 	if save:
 		plt.savefig('images/pr_graph.png')
 		# create HTML PR plot with plotly
-		trace = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale=[[0, 'rgb(255, 0, 0)'], [0.5, 'rgb(255, 255, 0)'], [1.0, 'rgb(0, 128, 0)']], showscale=True))
-		layout = go.Layout(title='Precision-Recall', xaxis=dict(title='Recall', titlefont=dict(size=18)), yaxis=dict(title='Precision', titlefont=dict(size=18)))
-		fig = go.Figure(data=[trace], layout=layout)
-		plotly.offline.plot(fig, filename='docs/pr_graph.html')
+		if not noply:
+			trace = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale=[[0, 'rgb(255, 0, 0)'], [0.5, 'rgb(255, 255, 0)'], [1.0, 'rgb(0, 128, 0)']], showscale=True))
+			layout = go.Layout(title='Precision-Recall', xaxis=dict(title='Recall', titlefont=dict(size=18)), yaxis=dict(title='Precision', titlefont=dict(size=18)))
+			fig = go.Figure(data=[trace], layout=layout)
+			plotly.offline.plot(fig, filename='docs/pr_graph.html')
 
 
 # plot accuracy curve
@@ -222,11 +254,11 @@ def plotAccuracy(x, y, z, save=False):
 	if save:
 		plt.savefig('images/accuracy_graph.png')
 		# create HTML Accuracy plot with plotly
-		
-		trace = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale=[[0, 'rgb(255, 0, 0)'], [0.5, 'rgb(255, 255, 0)'], [1.0, 'rgb(0, 128, 0)']], showscale=True))
-		layout = go.Layout(title='Accuracy', xaxis=dict(title='Threshold', titlefont=dict(size=18)), yaxis=dict(title='Accuracy', titlefont=dict(size=18)))
-		fig = go.Figure(data=[trace], layout=layout)
-		plotly.offline.plot(fig, filename='docs/accuracy_graph.html')
+		if not noply:
+			trace = go.Scatter(x=x, y=y, mode='markers', marker=dict(size=16, color=z, colorscale=[[0, 'rgb(255, 0, 0)'], [0.5, 'rgb(255, 255, 0)'], [1.0, 'rgb(0, 128, 0)']], showscale=True))
+			layout = go.Layout(title='Accuracy', xaxis=dict(title='Threshold', titlefont=dict(size=18)), yaxis=dict(title='Accuracy', titlefont=dict(size=18)))
+			fig = go.Figure(data=[trace], layout=layout)
+			plotly.offline.plot(fig, filename='docs/accuracy_graph.html')
 
 
 if __name__ == "__main__":
@@ -237,10 +269,11 @@ if __name__ == "__main__":
 		# test data
 		events = np.array([[0.95,1],[0.14,0],[0.66,1],[0.78,1],[0.10,0],[0.91,0],[0.08,0],[0.76,1],[0.76,0],[0.85,1],[0.17,0],[0.24,0],
 		[0.64,0],[0.20,0],[0.52,1],[0.09,0],[0.97,1],[0.90,1],[0.28,0],[0.71,1],[0.29,0],[0.14,0],[0.26,0],[0.86,0],[0.29,1],[0.13,0],[0.78,1],[0.18,0],[0.48,1],[0.58,1],[0.87,1]])
+		threshold_step = 5
 		plot = True
 		save = True
 
-	elif len(sys.argv) == 4:
+	elif len(sys.argv) == 5:
 		events = np.genfromtxt(sys.argv[1], delimiter=',')
 
 		if sys.argv[2] == 'true' or sys.argv[2] == 'True':
@@ -259,13 +292,15 @@ if __name__ == "__main__":
 			print("\n[Error] Second optional argument for saving must be either 'true' or 'false'\n")
 			sys.exit(1)
 
+		threshold_step = int(sys.argv[4])
+
 	else:
 		print("\n[ERROR] Incorrect number of arguments. Must specify 3 arguments - an event data file, a plot boolean, and a save boolean. Also accepts no args for built in test.\n \
      roc_analysis.py events_data_file.csv true true \n")
 		sys.exit(1)
 
 	# call analysis function
-	runAnalysis(events, plot, save)
+	runAnalysis(events, threshold_step, plot, save)
 
 	input("Press Enter to exit...")
 

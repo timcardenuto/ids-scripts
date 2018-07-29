@@ -9,11 +9,15 @@ import pytz
 import re
 import sys
 import time
+import json
 
 verbose = False	# print more output
 debug = True	# print more output
 
-# parse truth data for a list of attacks
+
+##################################################################################
+# Parse truth data for a list of attacks
+##################################################################################
 def parseTruthData(truth_text):
 	if debug: print("[DEBUG] Parsing truth data..."); t0 = time.time()
 	copy = False
@@ -78,9 +82,10 @@ def parseTruthData(truth_text):
 	return attacks
 
 
-
-# parse Sguil log messages for alerts, looks for lines with the following format:
+##################################################################################
+# Parse Sguil log messages for alerts, looks for lines with the following format:
 # 		2018-07-07 18:55:53 pid(3371)  Alert Received: 0 1 trojan-activity pching-VM-eth1-1 {1999-03-31 15:13:25} 2 15950 {ET MALWARE User-Agent (Win95)} 172.16.116.201 204.71.200.74 6 14461 80 1 2008015 9 293 293
+##################################################################################
 def parseSguilAlerts(detection_text, attacks):
 	if debug: print("[DEBUG] Parsing sguil log..."); t0 = time.time()
 	true_pos_alerts = list()
@@ -151,10 +156,84 @@ def parseSguilAlerts(detection_text, attacks):
 	return true_pos_alerts, false_pos_alerts, false_neg_attacks, true_pos_attacks
 
 
+##################################################################################
+# Parse Suricata EVE alerts
+##################################################################################
+def parseEveAlerts(detection_text, attacks):
+	if debug: print("[DEBUG] Parsing Suricata log..."); t0 = time.time()
 
-# to create parsable data from pcap file, use 'argus' and 'ra' utilies to pre-process:
+	true_pos_alerts = list()
+	false_pos_alerts = list()
+	true_pos_attacks = list()
+	for line in detection_text:
+		blob = json.loads(line)
+		if (blob['event_type'] == 'alert'):	# TODO check date to eliminate wasted time?
+			alert = {'date_time':'', 'src_addr':'', 'dst_addr':'', 'src_port':'', 'dst_port':'', 'reason':'', 'num_pkts':0, 'connections':0}
+			# un-adjust for GMT/DSL time offsets here, something added +5 hours to the data
+			alert['date_time'] = pytz.utc.localize(dateutil.parser.parse(blob['timestamp']) - timedelta(hours=5))
+			alert['src_addr'] = blob['src_ip']
+			alert['dst_addr'] = blob['dest_ip']
+			try:			
+				alert['src_port'] = str(blob['src_port'])
+				alert['dst_port'] = str(blob['dest_port'])
+			except:
+				if verbose: print("[WARNING] Ports not specified for alert: "+str(blob))
+			alert['reason'] = blob['alert']['signature']
+
+
+			# try to match alert against truth data attacks
+			tp = False
+			for attack in attacks:
+				# match IP address
+				if ((alert['src_addr'] == attack['attacker_ip']) and (alert['dst_addr'] == attack['victim_ip'])) or \
+				   ((alert['src_addr'] == attack['victim_ip']) and (alert['dst_addr'] == attack['attacker_ip'])):
+
+					# match ports, sometimes truth doesn't specify ports! So we're less strict with this one
+					if (alert['src_port'] in attack['ports']) or (alert['dst_port'] in attack['ports']) or (attack['ports'] == []):	
+
+						# match time range
+						# NOTE this uses the truth data duration, if something shows up in the data beyond that duration we don't count it...
+						if (attack['min_search_time'] < alert['date_time'] and alert['date_time'] < attack['max_search_time']):
+							if verbose: print("Alert match with attack "+attack['attack_name'])
+							true_pos_alerts.append(alert)
+							true_pos_attacks.append(attack)
+							tp = True
+							break
+
+						else:
+							if verbose: print("Partial match, alert didn't fall within time window: \nAlert: "+str(alert)+"\nAttack:"+str(attack))
+					else:
+						if verbose: print("Partial match, alert didn't share any ports: \nAlert: "+str(alert)+"\nAttack:"+str(attack))
+				
+			# this is an alert that falls in time range but doesn't have an IP matches = false positive
+			if not tp:
+				if verbose: print("False Positive: alert does not match any attack sufficiently "+str(alert))
+				false_pos_alerts.append(alert)
+					
+
+	# get the list of false negatives attacks (one's that weren't alerted on)
+	num_attacks = len(attacks)
+	i = 0
+	while i < len(attacks):
+		for true_pos_attack in true_pos_attacks:
+			if (attacks[i]['attack_name'] == true_pos_attack['attack_name']):	# if a truth attack matches one of the 'valid' detected ones (true positive), then remove it...
+				attacks.remove(attacks[i])
+				i = i - 1
+				break
+		i += 1
+	# ... what's left over in 'attacks' list are the false negatives
+	false_neg_attacks = attacks		
+
+	if debug: print("[DEBUG] parseSguilAlerts() run time: "+str(time.time()-t0)+" seconds")
+	return true_pos_alerts, false_pos_alerts, false_neg_attacks, true_pos_attacks
+
+
+
+##################################################################################
+# Parse Argus pre-processed pcap data created from the following:
 #	argus -r inside.tcpdump -w argus.raw
 #	cat argus.raw | ra -n -c ';'  > argus.txt
+##################################################################################
 def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_attacks):
 	if debug: print("[DEBUG] Parsing argus data..."); t0 = time.time()
 
@@ -182,7 +261,7 @@ def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_atta
 			start_time = pytz.utc.localize(datetime.strptime(pieces[0], "%H:%M:%S.%f").time().replace(microsecond=0))
 			# b/c we have to keep track of time and roll over dates, this should only evaluate true when timestamps stradle midnight!
 			if (start_time < pytz.utc.localize(date_time.time())): 
-				print("[WARNING] Day change: ")#+date_time.time()+" to "+start_time)
+				print("\n[WARNING] Day change: ")#+date_time.time()+" to "+start_time)
 				date = date + timedelta(days=1)
 			date_time = datetime.combine(date, start_time) 	# convert to a datetime object for comparison later
 			protocol = pieces[2]		
@@ -261,34 +340,42 @@ def parseArgusData(argus_text, true_pos_alerts, false_pos_alerts, false_neg_atta
 						true_neg_traffic['connections'] = true_neg_traffic['connections'] + 1
 					#	true_neg_traffic.append(argus)
 					
-		except Exception as e: print("[WARNING] Couldn't parse line: "+str(e))
+		except Exception as e: print("\n[WARNING] Couldn't parse line: "+str(e))
 
-	if debug: print("[DEBUG] parseArgusData() run time: "+str(time.time()-t0)+" seconds")
+	if debug: print("\n[DEBUG] parseArgusData() run time: "+str(time.time()-t0)+" seconds")
 	return true_pos_alerts, false_pos_alerts, false_neg_attacks, true_neg_traffic
 
 
 
+##################################################################################
+# Script entry point
+##################################################################################
 if __name__ == "__main__":
 	if debug: print("[DEBUG] Running IDS validation routine..."); t0 = time.time()
 
 	# read command line args
-	if len(sys.argv) == 4:
+	if len(sys.argv) == 5:
 		with open(sys.argv[1]) as fh:
 			truth_text = fh.readlines()
 		with open(sys.argv[2]) as fh:
 			detection_text = fh.readlines()
 		with open(sys.argv[3]) as fh:
 			argus_text = fh.readlines()
+		log_format = sys.argv[4]
+		if (log_format != "eve") and (log_format != "sguil"):
+			print("\n[ERROR] 4th argument '"+log_format+"' is unsupported. Should be the IDS alerts file format, either 'eve' or 'sguil'.\n")
+			sys.exit(1)
 	else:
-		print("\n[Error] Specify args for a truth data file, detected alerts file (sguil), and raw traffic file (argus): \n"+\
-				"	./check_snort_performance.py master_identification.list sguil.log argus.txt\n")
+		print("\n[ERROR] Specify args for a truth data file, IDS alerts file, raw traffic file (argus), and alert log format (eve or sguil): \n"+\
+				"	./check_ids_performance.py master_identification.list sguil.log argus.txt sguil\n")
 		sys.exit(1)
 
 	# parse truth data for a list of attacks
 	attacks = parseTruthData(truth_text) 
 
-	# parse Sguil log messages for alerts
-	true_pos_alerts, false_pos_alerts, false_neg_attacks, true_pos_attacks = parseSguilAlerts(detection_text, attacks)	
+	# parse log messages for alerts that match truth data
+	if (log_format == 'eve'):   true_pos_alerts, false_pos_alerts, false_neg_attacks, true_pos_attacks = parseEveAlerts(detection_text, attacks)	
+	if (log_format == 'sguil'): true_pos_alerts, false_pos_alerts, false_neg_attacks, true_pos_attacks = parseSguilAlerts(detection_text, attacks)	
 	if debug:
 		print("")
 		print("# of true positive alerts:   "+str(len(true_pos_alerts)))
@@ -327,55 +414,57 @@ if __name__ == "__main__":
 		print("  total in file:          "+str(true_neg_traffic['total_file_pkts']))
 		print("")
 
-	# print true positive alerts, with truth data for reference
-	print("###############################################################################")
-	print("               Truth Data		     True Positive Alerts")
-	last_attack_name = true_pos_attacks[0]['attack_name']
-	total_attack_connections = 0
-	total_attack_packet = 0
-	for idx, val in enumerate(true_pos_alerts):
-		# have to track this here because of how I tracked true positive alerts and attacks
-		if (true_pos_attacks[idx]['attack_name'] != last_attack_name):
-			print("## Total number of connections associated with attack "+last_attack_name+":   "+str(total_attack_connections))
-			print("## Total number of packets associated with attack "+last_attack_name+":   "+str(total_attack_packet))
-			print("")
-			last_attack_name = true_pos_attacks[idx]['attack_name']
-			total_attack_connections = 0
-			total_attack_packet = 0
-		total_attack_connections += val['connections']
-		total_attack_packet += val['num_pkts']
-		print(\
-"Name:          "+"{:<30}".format(true_pos_attacks[idx]['attack_name'])+val['reason']+"\n"+\
-"Date:          "+"{:<30}".format(str(true_pos_attacks[idx]['date_time'].date()))+str(val['date_time'].date())+"\n"+\
-"Time:          "+"{:<30}".format(str(true_pos_attacks[idx]['date_time'].time())+"  +"+str(true_pos_attacks[idx]['duration']))+str(val['date_time'].time())+"\n"+\
-"Addr:          "+"{:<30}".format(true_pos_attacks[idx]['attacker_ip'])+val['src_addr']+"\n"+\
-"               "+"{:<30}".format(true_pos_attacks[idx]['victim_ip'])+val['dst_addr']+"\n"+\
-"Port:          "+"{:<30}".format(str(true_pos_attacks[idx]['ports']))+val['src_port']+", "+val['dst_port']+"\n"\
-"Num Packets:   "+"{:<30}".format("?")+str(val['num_pkts'])+"\n"\
-"Connections:   "+"{:<30}".format("?")+str(val['connections'])+"\n")
 
-	print("## Total number of connections associated with attack "+last_attack_name+":   "+str(total_attack_connections))
-	print("## Total number of packets associated with attack "+last_attack_name+":   "+str(total_attack_packet))
-	print("")
-
-	# print false negative argus data, with truth data for reference
-	# this prints *per connection* detected by argus, so you'll see repeated truth data attacks for every detected connection that matches
-	print("###############################################################################")
-	print("               Truth Data		     False Negative Argus Connections")
-	for idx, val in enumerate(false_neg_attacks):
-		for idx2, val2 in enumerate(val['detections']):
+	if verbose: 
+		# print true positive alerts, with truth data for reference
+		print("###############################################################################")
+		print("               Truth Data		     True Positive Alerts")
+		last_attack_name = true_pos_attacks[0]['attack_name']
+		total_attack_connections = 0
+		total_attack_packet = 0
+		for idx, val in enumerate(true_pos_alerts):
+			# have to track this here because of how I tracked true positive alerts and attacks
+			if (true_pos_attacks[idx]['attack_name'] != last_attack_name):
+				print("## Total number of connections associated with attack "+last_attack_name+":   "+str(total_attack_connections))
+				print("## Total number of packets associated with attack "+last_attack_name+":   "+str(total_attack_packet))
+				print("")
+				last_attack_name = true_pos_attacks[idx]['attack_name']
+				total_attack_connections = 0
+				total_attack_packet = 0
+			total_attack_connections += val['connections']
+			total_attack_packet += val['num_pkts']
 			print(\
-"Name:          "+"{:<30}".format(val['attack_name'])+val2['protocol']+"\n"+\
-"Date:          "+"{:<30}".format(str(val['date_time'].date()))+str(val2['date_time'].date())+"\n"+\
-"Time:          "+"{:<30}".format(str(val['date_time'].time())+"  +"+str(val['duration']))+str(val2['date_time'].time())+"\n"+\
-"Addr:          "+"{:<30}".format(val['attacker_ip'])+val2['src_addr']+"\n"+\
-"               "+"{:<30}".format(val['victim_ip'])+val2['dst_addr']+"\n"+\
-"Port:          "+"{:<30}".format(str(val['ports']))+val2['src_port']+", "+val2['dst_port']+"\n"\
-"Num Packets:   "+"{:<30}".format("?")+str(val2['num_pkts'])+"\n")
+			"Name:          "+"{:<30}".format(true_pos_attacks[idx]['attack_name'])+val['reason']+"\n"+\
+			"Date:          "+"{:<30}".format(str(true_pos_attacks[idx]['date_time'].date()))+str(val['date_time'].date())+"\n"+\
+			"Time:          "+"{:<30}".format(str(true_pos_attacks[idx]['date_time'].time())+"  +"+str(true_pos_attacks[idx]['duration']))+str(val['date_time'].time())+"\n"+\
+			"Addr:          "+"{:<30}".format(true_pos_attacks[idx]['attacker_ip'])+val['src_addr']+"\n"+\
+			"               "+"{:<30}".format(true_pos_attacks[idx]['victim_ip'])+val['dst_addr']+"\n"+\
+			"Port:          "+"{:<30}".format(str(true_pos_attacks[idx]['ports']))+val['src_port']+", "+val['dst_port']+"\n"\
+			"Num Packets:   "+"{:<30}".format("?")+str(val['num_pkts'])+"\n"\
+			"Connections:   "+"{:<30}".format("?")+str(val['connections'])+"\n")
 
-		print("## Total number of connections associated with attack "+val['attack_name']+":   "+str(val['connections']))
-		print("## Total number of packets associated with attack "+val['attack_name']+":   "+str(val['num_pkts']))
+		print("## Total number of connections associated with attack "+last_attack_name+":   "+str(total_attack_connections))
+		print("## Total number of packets associated with attack "+last_attack_name+":   "+str(total_attack_packet))
 		print("")
+
+		# print false negative argus data, with truth data for reference
+		# this prints *per connection* detected by argus, so you'll see repeated truth data attacks for every detected connection that matches
+		print("###############################################################################")
+		print("               Truth Data		     False Negative Argus Connections")
+		for idx, val in enumerate(false_neg_attacks):
+			for idx2, val2 in enumerate(val['detections']):
+				print(\
+				"Name:          "+"{:<30}".format(val['attack_name'])+val2['protocol']+"\n"+\
+				"Date:          "+"{:<30}".format(str(val['date_time'].date()))+str(val2['date_time'].date())+"\n"+\
+				"Time:          "+"{:<30}".format(str(val['date_time'].time())+"  +"+str(val['duration']))+str(val2['date_time'].time())+"\n"+\
+				"Addr:          "+"{:<30}".format(val['attacker_ip'])+val2['src_addr']+"\n"+\
+				"               "+"{:<30}".format(val['victim_ip'])+val2['dst_addr']+"\n"+\
+				"Port:          "+"{:<30}".format(str(val['ports']))+val2['src_port']+", "+val2['dst_port']+"\n"\
+				"Num Packets:   "+"{:<30}".format("?")+str(val2['num_pkts'])+"\n")
+
+			print("## Total number of connections associated with attack "+val['attack_name']+":   "+str(val['connections']))
+			print("## Total number of packets associated with attack "+val['attack_name']+":   "+str(val['num_pkts']))
+			print("")
 
 	if debug: print("[DEBUG] Total wall clock run time: "+str(time.time()-t0)+" seconds")
 
